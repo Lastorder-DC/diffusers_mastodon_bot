@@ -81,6 +81,7 @@ class AppStreamListener(mastodon.StreamListener):
         self.toot_listen_start = toot_listen_start
         self.toot_listen_start_cw = toot_listen_start_cw
         self.toot_listen_end = toot_listen_end
+        self.default_bot_name = default_bot_name
 
         if self.toot_listen_start is None:
             self.toot_listen_start = f'listening (diffusers_mastodon_bot)'
