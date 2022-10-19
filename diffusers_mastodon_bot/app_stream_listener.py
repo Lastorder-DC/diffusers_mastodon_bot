@@ -87,6 +87,9 @@ class AppStreamListener(mastodon.StreamListener):
 
         if self.toot_listen_end is None:
             self.toot_listen_end = f'exiting (diffusers_mastodon_bot)\n\ndo not send me anymore'
+        
+        if self.default_bot_name is None:
+            self.default_bot_name = f'Mastodon Diffuser Bot'
 
         self.bot_ctx = BotContext(
             bot_acct_url=mention_to_url,
@@ -102,14 +105,14 @@ class AppStreamListener(mastodon.StreamListener):
 
         def exit_toot():
             if toot_on_start_end:
-                self.mastodon.account_update_credentials(display_name="[OFF] " + self.default_bot_name)
+                self.mastodon.account_update_credentials(display_name=f'[OFF] {self.default_bot_name}')
             pass
 
         atexit.register(exit_toot)
 
         print('listening')
         if toot_on_start_end:
-            self.mastodon.account_update_credentials(display_name="[ON] " + self.default_bot_name)
+            self.mastodon.account_update_credentials(display_name=f'[ON] {self.default_bot_name}')
 
     def status_contains_target_tag(self, status):
         # [{'name': 'testasdf', 'url': 'https://don.naru.cafe/tags/testasdf'}]
