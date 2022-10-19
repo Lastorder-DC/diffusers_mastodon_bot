@@ -84,6 +84,7 @@ def main():
     toot_listen_start = read_text_file('./config/toot_listen_start.txt')
     toot_listen_end = read_text_file('./config/toot_listen_end.txt')
     toot_listen_start_cw = read_text_file('./config/toot_listen_start_cw.txt')
+    default_bot_name = read_text_file('./config/default_bot_name.txt')
 
     proc_kwargs = load_json_dict('./config/proc_kwargs.json')
     app_stream_listener_kwargs = load_json_dict('./config/app_stream_listener_kwargs.json')
