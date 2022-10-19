@@ -6,6 +6,7 @@ a quick and dirty bot, running stable diffuser, via huggingface diffusers
 
 - virtualenv
 - install pytorch, via pip, enabling nvidia
+- cuda version should match(If pytorch is based on cuda 11.6, install cuda 11.6 instead of 11.8)
 - `pip install -r requirements.txt`
 - `huggingface-cli login` (see hf diffusers)
 - create app from account setting, fill these text files
