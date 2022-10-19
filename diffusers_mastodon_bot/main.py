@@ -132,6 +132,7 @@ def main():
                                  toot_listen_start=toot_listen_start,
                                  toot_listen_start_cw=toot_listen_start_cw,
                                  toot_listen_end=toot_listen_end,
+                                 default_bot_name=default_bot_name,
                                  device=device_name,
                                  proc_kwargs=proc_kwargs,
                                  **app_stream_listener_kwargs
