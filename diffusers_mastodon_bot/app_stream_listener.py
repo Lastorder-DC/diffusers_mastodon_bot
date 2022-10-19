@@ -28,7 +28,7 @@ class AppStreamListener(mastodon.StreamListener):
                  req_handlers: List[BotRequestHandler] = [],
                  default_visibility='unlisted', output_save_path='./diffused_results',
                  toot_listen_start: Union[str, None] = None, toot_listen_end: Union[str, None] = None,
-                 toot_listen_start_cw: Union[str, None] = None,
+                 toot_listen_start_cw: Union[str, None] = None, default_bot_name: Union[str, None] = None,
                  delete_processing_message=False,
                  image_count=1,
                  max_image_count=1,
@@ -102,18 +102,14 @@ class AppStreamListener(mastodon.StreamListener):
 
         def exit_toot():
             if toot_on_start_end:
-                self.mastodon.status_post(self.toot_listen_end, visibility=default_visibility)
+                self.mastodon.account_update_credentials(display_name="[OFF] " + self.default_bot_name)
             pass
 
         atexit.register(exit_toot)
 
         print('listening')
         if toot_on_start_end:
-            self.mastodon.status_post(
-                self.toot_listen_start,
-                spoiler_text=self.toot_listen_start_cw,
-                visibility=default_visibility
-            )
+            self.mastodon.account_update_credentials(display_name="[ON] " + self.default_bot_name)
 
     def status_contains_target_tag(self, status):
         # [{'name': 'testasdf', 'url': 'https://don.naru.cafe/tags/testasdf'}]
