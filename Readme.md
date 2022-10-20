@@ -46,33 +46,4 @@ high contrast, trecen school suite, uma musume
 
 ## config examples
 
-<<<<<<< HEAD
-### `config/proc_kwargs.json`
-
-bug?: https://github.com/huggingface/diffusers/issues/255
-
-```json
-{
-  "width": 512,
-  "height": 704,
-  "num_inference_steps": 70,
-  "guidance_scale": 12.0
-}
-```
-
-### `config/app_stream_kwargs.json`
-
-```json
-{
-  "image_count": 4,
-  "max_image_count": 16,
-  "image_tile_xy": [2, 2],
-  "max_batch_process": 1,
-  "delete_processing_message": false,
-  "toot_on_start_end": true,
-  "default_negative_prompt": "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry"
-}
-```
-=======
 see `config_example`. copy-paste it to `config` and modify from there.
->>>>>>> 3a5eac5dbbcf954639073c0e5c39c26069858210
