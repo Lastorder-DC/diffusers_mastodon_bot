@@ -26,9 +26,12 @@ class AppStreamListener(mastodon.StreamListener):
     def __init__(self, mastodon_client, diffusers_pipeline: diffusers.pipelines.StableDiffusionPipeline,
                  mention_to_url: str,
                  req_handlers: List[BotRequestHandler] = [],
-                 default_visibility='unlisted', output_save_path='./diffused_results',
-                 toot_listen_start: Union[str, None] = None, toot_listen_end: Union[str, None] = None,
-                 toot_listen_start_cw: Union[str, None] = None, default_bot_name: Union[str, None] = None,
+                 default_visibility='unlisted',
+                 output_save_path='./diffused_results',
+                 toot_listen_start: Union[str, None] = None,
+                 toot_listen_end: Union[str, None] = None,
+                 toot_listen_start_cw: Union[str, None] = None,
+                 default_bot_name: Union[str, None] = None,
                  delete_processing_message=False,
                  image_count=1,
                  max_image_count=1,
@@ -105,6 +108,7 @@ class AppStreamListener(mastodon.StreamListener):
             image_tile_xy=self.image_tile_xy,
             image_tile_auto_expand=self.image_tile_auto_expand,
             image_max_attachment_count=self.image_max_attachment_count,
+            default_visibility=default_visibility,
             device_name=self.device
         )
 
@@ -243,6 +247,19 @@ class AppStreamListener(mastodon.StreamListener):
 
                 elif before_args_name in ['guidance_scale']:
                     proc_kwargs[before_args_name] = min(float(args_value), 100.0)
+
+                elif before_args_name in ['strength']:
+                    actual_value = None
+                    if args_value.strip() == 'low':
+                        actual_value = 0.35
+                    elif args_value.strip() == 'medium':
+                        actual_value = 0.65
+                    elif args_value.strip() == 'high':
+                        actual_value = 0.8
+                    else:    
+                        actual_value = max(min(float(args_value), 1.0), 0.0)
+                    proc_kwargs[before_args_name] = actual_value
+                    
 
                 before_args_name = None
                 continue

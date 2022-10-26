@@ -11,9 +11,11 @@ from typing import *
 import traceback
 
 import diffusers.pipelines
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
+from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 import torch
 import transformers
-from PIL.Image import Image
+import PIL
 from torch import autocast
 from transformers import CLIPTokenizer, CLIPTextModel
 from transformers.modeling_outputs import BaseModelOutputWithPooling
@@ -77,32 +79,50 @@ class DiffusionRunner:
         return embed
 
     @staticmethod
-    def make_processing_body(
-            pipe: diffusers.pipelines.StableDiffusionPipeline,
-            args_ctx: ProcArgsContext
-    ) -> str:
-        # start message
-        processing_body = ''
-
+    def args_prompts_as_input_text(
+        pipe: Any,
+        args_ctx: ProcArgsContext
+    ) -> Tuple[str, Optional[str]]:
         # noinspection PyUnresolvedReferences
         tokenizer: transformers.CLIPTokenizer = pipe.tokenizer  # type: ignore
 
-        positive_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['positive'], tokenizer)
+        positive_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['positive'], pipe.tokenizer)
+        negative_input_form = None
+
+        if args_ctx.prompts['negative'] is not None and len(args_ctx.prompts['negative']) > 0:
+            negative_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['negative'], tokenizer)
+
+        return positive_input_form, negative_input_form
+
+
+    @staticmethod
+    def make_processing_body(
+        args_ctx: ProcArgsContext,
+        positive_input_form: str,
+        negative_input_form: Optional[str]
+    ) -> str:
+        # start message
+        processing_body = ''
 
         if positive_input_form != args_ctx.prompts["positive"]:
             processing_body += f'\n\npositive prompt:\n{positive_input_form}'
 
         if args_ctx.prompts['negative'] is not None and len(args_ctx.prompts['negative']) > 0:
-            negative_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['negative'], tokenizer)
             if negative_input_form != args_ctx.prompts["negative"]:
                 processing_body += f'\n\nnegative prompt:\n{negative_input_form}'
 
         return processing_body[0:400]
 
     @staticmethod
-    def run_diffusion_and_upload(pipe: diffusers.pipelines.StableDiffusionPipeline,
-                                 ctx: BotRequestContext,
-                                 args_ctx: ProcArgsContext) -> Optional[Result]:
+    def run_sth_and_upload(
+        ctx: BotRequestContext,
+        args_ctx: ProcArgsContext,
+        pipe: Any,
+        filename_root: str,
+        run_diffusion_fn: Callable,
+        run_diffusion_fn_kwargs: Dict['str', Any] = {},
+    ) -> Result:
+
         result: DiffusionRunner.Result = {
             "image_filenames": [],
             "images_list_posted": [],
@@ -110,34 +130,12 @@ class DiffusionRunner:
             "time_took": ''
         }
 
-        generated_images_raw_pil = []
-
         with autocast(ctx.bot_ctx.device_name):
             start_time = time.time()
-            filename_root = datetime.now().strftime('%Y-%m-%d') + f'_{str(start_time)}'
-
-            left_images_count = args_ctx.target_image_count
-
-            while left_images_count > 0:
-                cur_process_count = min(ctx.bot_ctx.max_batch_process, left_images_count)
-                logging.info(
-                    f"processing {args_ctx.target_image_count - left_images_count + 1} of {args_ctx.target_image_count}, "
-                    + f"by {cur_process_count}")
-
-                pipe_results = pipe(
-                    [args_ctx.prompts['positive']] * cur_process_count,
-                    negative_prompt=([args_ctx.prompts['negative_with_default']] * cur_process_count
-                                     if args_ctx.prompts['negative_with_default'] is not None
-                                     else None),
-                    **args_ctx.proc_kwargs
-                )
-
-                generated_images_raw_pil.extend(pipe_results.images)
-                if pipe_results.nsfw_content_detected:
-                    result["has_any_nsfw"] = True
-
-                left_images_count -= ctx.bot_ctx.max_batch_process
-
+            
+            generated_images_raw_pil, has_any_nsfw = run_diffusion_fn(ctx, args_ctx, pipe, **run_diffusion_fn_kwargs)
+            result["has_any_nsfw"] = has_any_nsfw
+            
             end_time = time.time()
 
             time_took = end_time - start_time
@@ -145,19 +143,165 @@ class DiffusionRunner:
 
             result["time_took"] = f'{time_took}s'
 
-            # save anyway
-            for idx in range(args_ctx.target_image_count):
-                image_filename = str(Path(ctx.bot_ctx.output_save_path, filename_root + f'_{idx}' + '.png').resolve())
-                text_filename = str(Path(ctx.bot_ctx.output_save_path, filename_root + f'_{idx}' + '.txt').resolve())
+        result["image_filenames"] = DiffusionRunner.save_images(ctx, args_ctx, filename_root, generated_images_raw_pil)
 
-                time_took += end_time - start_time
+        uploaded_images = DiffusionRunner.upload_images(ctx, generated_images_raw_pil)
+        result["images_list_posted"] = uploaded_images
 
-                image: Image = generated_images_raw_pil[idx]
+        return result
 
-                image.save(image_filename, "PNG")
-                Path(text_filename).write_text(json.dumps(args_ctx.prompts))
+    @staticmethod
+    def run_diffusion_and_upload(pipe: diffusers.pipelines.StableDiffusionPipeline,
+                                 ctx: BotRequestContext,
+                                 args_ctx: ProcArgsContext) -> Result:
+        return DiffusionRunner.run_sth_and_upload(
+            ctx,
+            args_ctx,
+            pipe,
+            filename_root=datetime.now().strftime('%Y-%m-%d_%H-%M-%S_sd'),
+            run_diffusion_fn=DiffusionRunner.run_diffusion,
+        )
 
-                result["image_filenames"].append(image_filename)
+    @staticmethod
+    def run_diffusion(ctx, args_ctx, pipe: StableDiffusionPipeline) -> Tuple[List[PIL.Image.Image], bool]:
+        left_images_count = args_ctx.target_image_count
+        generated_images_raw_pil = []
+        has_any_nsfw = False
+
+        def key_or_none(key):
+            return args_ctx.proc_kwargs[key] if key in args_ctx.proc_kwargs else None
+
+        manual_proc_kwargs = {
+            "width": key_or_none('width'),
+            "height": key_or_none('height'),
+            "num_inference_steps": key_or_none('num_inference_steps'),
+            "guidance_scale": key_or_none('guidance_scale')
+        }
+
+        while left_images_count > 0:
+            cur_process_count = min(ctx.bot_ctx.max_batch_process, left_images_count)
+            logging.info(
+                f"processing {args_ctx.target_image_count - left_images_count + 1} of {args_ctx.target_image_count}, "
+                + f"by {cur_process_count}")
+
+            pipe_results = pipe(
+                [args_ctx.prompts['positive']] * cur_process_count,
+                negative_prompt=([args_ctx.prompts['negative_with_default']] * cur_process_count
+                                    if args_ctx.prompts['negative_with_default'] is not None
+                                    else None),
+                **manual_proc_kwargs
+            )
+
+            generated_images_raw_pil.extend(pipe_results.images)
+            if pipe_results.nsfw_content_detected:
+                has_any_nsfw = True
+
+            left_images_count -= ctx.bot_ctx.max_batch_process
+
+        return generated_images_raw_pil, has_any_nsfw
+
+    @staticmethod
+    def run_img2img_and_upload(pipe: diffusers.pipelines.StableDiffusionImg2ImgPipeline,
+                                ctx: BotRequestContext,
+                                args_ctx: ProcArgsContext,
+                                init_image: PIL.Image.Image,
+                                generator: Optional[torch.Generator] = None
+                                ) -> Result:
+        filename_root = datetime.now().strftime('%Y-%m-%d_%H-%M-%S_im2im')
+
+        result = DiffusionRunner.run_sth_and_upload(
+            ctx,
+            args_ctx,
+            pipe,
+            filename_root=filename_root,
+            run_diffusion_fn=DiffusionRunner.run_img2img,
+            run_diffusion_fn_kwargs={
+                "init_image": init_image,
+                "generator": generator
+            }
+        )
+
+        # save init image too
+        DiffusionRunner.save_images(
+            ctx,
+            args_ctx,
+            filename_root=filename_root + '_src',
+            generated_images_raw_pil=[init_image],
+            save_args=False
+        )
+
+        return result
+
+    @staticmethod
+    def run_img2img(ctx, args_ctx, pipe: StableDiffusionImg2ImgPipeline, init_image: PIL.Image.Image, generator: Optional[torch.Generator] = None) -> Tuple[List[PIL.Image.Image], bool]:
+        left_images_count = args_ctx.target_image_count
+        generated_images_raw_pil = []
+        has_any_nsfw = False
+
+        def key_or_none(key):
+            return args_ctx.proc_kwargs[key] if key in args_ctx.proc_kwargs else None
+
+        manual_proc_kwargs = {
+            "width": key_or_none('width'),
+            "height": key_or_none('height'),
+            "num_inference_steps": key_or_none('num_inference_steps'),
+            "guidance_scale": key_or_none('guidance_scale'),
+            "strength": key_or_none('strength'),
+        }
+
+        if manual_proc_kwargs['strength'] is None:
+            del manual_proc_kwargs['strength']
+
+        while left_images_count > 0:
+            cur_process_count = min(ctx.bot_ctx.max_batch_process, left_images_count)
+            logging.info(
+                f"processing {args_ctx.target_image_count - left_images_count + 1} of {args_ctx.target_image_count}, "
+                + f"by {cur_process_count}")
+
+            pipe_results = pipe(
+                [args_ctx.prompts['positive']] * cur_process_count,
+                negative_prompt=([args_ctx.prompts['negative_with_default']] * cur_process_count
+                                    if args_ctx.prompts['negative_with_default'] is not None
+                                    else None),
+                generator=generator,
+                init_image=init_image,
+                **manual_proc_kwargs
+            )
+
+            generated_images_raw_pil.extend(pipe_results.images)
+            if pipe_results.nsfw_content_detected:
+                has_any_nsfw = True
+
+            left_images_count -= ctx.bot_ctx.max_batch_process
+
+        return generated_images_raw_pil, has_any_nsfw
+
+
+
+    @staticmethod
+    def save_images(ctx: BotRequestContext, args_ctx: ProcArgsContext, filename_root: str, generated_images_raw_pil: List[PIL.Image.Image], save_args: bool = True) -> List[str]:
+        image_filenames = []
+        # save anyway
+        for idx in range(len(generated_images_raw_pil)):
+            image_filename = str(Path(ctx.bot_ctx.output_save_path, filename_root + f'_{idx}' + '.png').resolve())
+
+
+            image: PIL.Image.Image = generated_images_raw_pil[idx]
+
+            image.save(image_filename, "PNG")
+            
+
+            image_filenames.append(image_filename)
+
+        if save_args:
+            text_filename = str(Path(ctx.bot_ctx.output_save_path, filename_root + '.txt').resolve())
+            Path(text_filename).write_text(json.dumps(args_ctx, default=vars))
+
+        return image_filenames
+
+
+    @staticmethod
+    def upload_images(ctx: BotRequestContext, generated_images_raw_pil: List[PIL.Image.Image]) -> List[PIL.Image.Image]:
 
         logging.info(f'preparing images to upload')
 
@@ -171,6 +315,8 @@ class DiffusionRunner:
 
         logging.info(f'uploading {len(generated_images_raw_pil)} images')
 
+        posted_images = []
+
         for pil_image in pil_image_grids:
             try:
                 # pil to png
@@ -180,16 +326,16 @@ class DiffusionRunner:
                 png_bytes = img_byte_arr.getvalue()
 
                 upload_result = ctx.mastodon.media_post(png_bytes, 'image/png')
-                result["images_list_posted"].append(upload_result)
+                posted_images.append(upload_result)
             except Exception as ex:
                 logging.error(f'error on image upload:\n' + "\n  ".join(traceback.format_exception(ex)))
                 pass
 
-        return result
+        return posted_images
 
     @staticmethod
     def image_grid_by_cfg(
-            pil_images: List[Image],
+            pil_images: List[PIL.Image.Image],
             image_tile_x: int,
             image_tile_y: int,
             image_tile_auto_expand: bool,
@@ -209,7 +355,7 @@ class DiffusionRunner:
 
         image_grid_unit = int(image_tile_x * image_tile_y)
 
-        images_grouped: List[List[Image]] = []
+        images_grouped: List[List[PIL.Image.Image]] = []
 
         # maximum square size, smaller than image_tile_x & image_tile_y
         fitting_square = math.pow(math.floor(math.sqrt(image_grid_unit)), 2)
@@ -258,3 +404,46 @@ class DiffusionRunner:
             grid_image = image_grid(image_group, max_x, max_y)
             pil_image_grids.append(grid_image)
         return pil_image_grids
+
+    @staticmethod
+    def make_reply_message_contents(
+        ctx: BotRequestContext,
+        args_ctx: ProcArgsContext,
+        diffusion_result: Any,  # DiffusionRunner.Result
+        detecting_args: List[str],
+        args_custom_text: Optional[str] = None,
+        positive_input_form: str = '',
+        negative_input_form: Optional[str] = None
+    ):  
+        reply_message = "\ntime: " + diffusion_result['time_took']
+            
+        def detect_args_and_print(args_name):
+            if args_ctx.proc_kwargs is not None and args_name in args_ctx.proc_kwargs:
+                return '\n' + f'{args_name}: {args_ctx.proc_kwargs[args_name]}'
+            else:
+                return ''
+
+        for key in detecting_args:
+            reply_message += detect_args_and_print(key)
+
+        if args_custom_text is not None:
+            reply_message += '\n' + args_custom_text
+
+        if diffusion_result["has_any_nsfw"]:
+            reply_message += '\n\n' + 'nsfw content detected, some of result will be a empty image'
+
+        reply_message += '\n\n' + f'prompt: \n{positive_input_form}'
+
+        if negative_input_form is not None:
+            reply_message += '\n\n' + f'negative prompt (without default): \n{negative_input_form}'
+
+        if len(reply_message) >= 450:
+            reply_message = reply_message[0:400] + '...'
+
+        media_ids = [image_posted['id'] for image_posted in diffusion_result["images_list_posted"]]
+        if diffusion_result["has_any_nsfw"] and ctx.bot_ctx.no_image_on_any_nsfw:
+            media_ids = None
+
+        spoiler_text = '[done] ' + args_ctx.prompts['positive'][0:20] + '...'
+
+        return reply_message, spoiler_text, media_ids

@@ -116,17 +116,17 @@ class DiffuseGameHandler(BotRequestHandler):
 
         answer_info = ''
         answer_info += self.messages['question_by'].replace('{account}', '@' + this_game.questioner_acct)
-        if this_game.gold_positive_prompt is not None:
+        if this_game.gold_positive_input_form is not None:
             answer_info += '\n\n' + self.messages['gold_positive_prompt'] \
-                .replace('{prompt}', this_game.gold_positive_prompt)
-        if this_game.gold_negative_prompt is not None:
+                .replace('{prompt}', this_game.gold_positive_input_form)
+        if this_game.gold_negative_input_form is not None:
             answer_info += '\n\n' + self.messages['gold_negative_prompt'] \
-                .replace('{prompt}', this_game.gold_negative_prompt)
+                .replace('{prompt}', this_game.gold_negative_input_form)
 
         if len(this_game.submissions) == 0:
             message = self.messages['game_no_player'] + '\n\n' + answer_info
             any_ctx.reply_to(this_game.status, message[0:480],
-                             visibility="unlisted", spoiler_text=self.messages['game_no_player_cw'], untag=True)
+                             visibility=any_ctx.bot_ctx.default_visibility, spoiler_text=self.messages['game_no_player_cw'], untag=True)
             return
 
         scores: List[DiffuseGameSubmission] = \
@@ -157,12 +157,12 @@ class DiffuseGameHandler(BotRequestHandler):
             )
 
         response_body = response_body.strip()
-        result_status = any_ctx.mastodon.status_post(response_body[0:480], visibility="unlisted", in_reply_to_id=this_game.status['id'])
+        result_status = any_ctx.mastodon.status_post(response_body[0:480], visibility=any_ctx.bot_ctx.default_visibility, in_reply_to_id=this_game.status['id'])
 
         any_ctx.mastodon.status_post(
             answer_info[0:480],
             in_reply_to_id=result_status['id'],
-            visibility="unlisted",
+            visibility=any_ctx.bot_ctx.default_visibility,
             spoiler_text=self.messages['answer_submission_was_by_cw'],
             )
 
@@ -180,10 +180,13 @@ class DiffuseGameHandler(BotRequestHandler):
             return True  # it is correctly processed case.
 
         # start
-        in_progress_status = self.reply_in_progress(ctx, args_ctx)
+        positive_input_form, negative_input_form = DiffusionRunner.args_prompts_as_input_text(self.pipe, args_ctx)
+        
+        in_progress_status = self.reply_in_progress(ctx, args_ctx, positive_input_form, negative_input_form)
+
         in_progress_public_status = ctx.mastodon.status_post(
             self.messages['new_game_generation_in_progress'],
-            visibility="unlisted"
+            visibility=ctx.bot_ctx.default_visibility
         )
 
         diffusion_result: DiffusionRunner.Result = \
@@ -196,7 +199,7 @@ class DiffuseGameHandler(BotRequestHandler):
         current_game_status: Dict[str, Any] = ctx.mastodon.status_post(
             self.messages['new_game_start_announce'],
             media_ids=media_ids,
-            visibility='unlisted',
+            visibility=ctx.bot_ctx.default_visibility,
             sensitive=True,
             in_reply_to_id=in_progress_public_status['id']
         )
@@ -208,7 +211,9 @@ class DiffuseGameHandler(BotRequestHandler):
             questioner_url=ctx.status['account']['url'],
             questioner_acct=ctx.status['account']['acct'],
             positive_prompt=args_ctx.prompts['positive'],
-            negative_prompt=args_ctx.prompts['negative']
+            negative_prompt=args_ctx.prompts['negative'],
+            positive_input_form=positive_input_form,
+            negative_input_form=negative_input_form,
         )
 
         self.current_game_timer = Timer(self.response_duration_sec, self.close_game, args=[ctx])
@@ -278,8 +283,8 @@ class DiffuseGameHandler(BotRequestHandler):
             self.current_game_timer.cancel()
             self.close_game(any_ctx=ctx, early_end_status=ctx.status)
 
-    def reply_in_progress(self, ctx: BotRequestContext, args_ctx: ProcArgsContext):
-        processing_body = DiffusionRunner.make_processing_body(self.pipe, args_ctx=args_ctx)
+    def reply_in_progress(self, ctx: BotRequestContext, args_ctx: ProcArgsContext, positive_input_form: str, negative_input_form: Optional[str]):
+        processing_body = DiffusionRunner.make_processing_body(args_ctx, positive_input_form, negative_input_form)
         in_progress_status = ctx.reply_to(status=ctx.status,
                                           body=processing_body if len(processing_body) > 0 else 'processing...',
                                           spoiler_text='processing...' if len(processing_body) > 0 else None,
