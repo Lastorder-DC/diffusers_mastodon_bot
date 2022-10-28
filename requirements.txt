@@ -1,6 +1,6 @@
 diffusers < 0.7, >= 0.6
 transformers
-git+https://github.com/halcy/Mastodon.py@master#egg=mastodon.py
+Mastodonplus.py
 ftfy
 spacy
 pillow
