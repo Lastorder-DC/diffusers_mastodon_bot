@@ -18,12 +18,14 @@ from .bot_request_handler import BotRequestHandler
 from .bot_request_context import BotRequestContext
 from .diffusion_runner import DiffusionRunner
 from .proc_args_context import ProcArgsContext
-from ..utils import image_grid
+
+from diffusers_mastodon_bot.community_pipeline.lpw_stable_diffusion \
+    import StableDiffusionLongPromptWeightingPipeline as StableDiffusionLpw
 
 
 class DiffuseMeHandler(BotRequestHandler):
     def __init__(self,
-                 pipe: diffusers.pipelines.StableDiffusionPipeline,
+                 pipe: StableDiffusionLpw,
                  tag_name: str = 'diffuse_me',
                  allow_self_request_only: bool = False
                  ):
@@ -45,16 +47,16 @@ class DiffuseMeHandler(BotRequestHandler):
 
     def respond_to(self, ctx: BotRequestContext, args_ctx: ProcArgsContext) -> bool:
         # start
-        positive_input_form, negative_input_form = DiffusionRunner.args_prompts_as_input_text(self.pipe, args_ctx)
-        
-        in_progress_status = self.reply_in_progress(ctx, args_ctx, positive_input_form, negative_input_form)
+        positive_input_form = args_ctx.prompts['positive']
+        negative_input_form = args_ctx.prompts['negative']
+
+        in_progress_status = ctx.reply_to(ctx.status, 'processing...')
 
         if 'num_inference_steps' in args_ctx.proc_kwargs \
             and args_ctx.proc_kwargs['num_inference_steps'] is not None:
             args_ctx.proc_kwargs['num_inference_steps'] = int(args_ctx.proc_kwargs['num_inference_steps'])
 
         diffusion_result: DiffusionRunner.Result = DiffusionRunner.run_diffusion_and_upload(self.pipe, ctx, args_ctx)
-        reply_message = "\ntime: " + diffusion_result['time_took']
 
         logging.info(f'building reply text')
 
@@ -69,12 +71,18 @@ class DiffuseMeHandler(BotRequestHandler):
 
         reply_target_status = ctx.status if ctx.bot_ctx.delete_processing_message else in_progress_status
 
-        ctx.mastodon.status_reply(reply_target_status, reply_message,
-                                  media_ids=media_ids,
-                                  visibility=ctx.reply_visibility,
-                                  spoiler_text=spoiler_text,
-                                  sensitive=True
-                                  )
+        replied_status = ctx.reply_to(
+            reply_target_status,
+            reply_message,
+            media_ids=media_ids,
+            visibility=ctx.reply_visibility,
+            spoiler_text=spoiler_text,
+            sensitive=True,
+            tag_behind=ctx.bot_ctx.tag_behind_on_image_post
+        )
+
+        if ctx.bot_ctx.tag_behind_on_image_post:
+            ctx.mastodon.status_reblog(replied_status['id'])
 
         if ctx.bot_ctx.delete_processing_message:
             ctx.mastodon.status_delete(in_progress_status)

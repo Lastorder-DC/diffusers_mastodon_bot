@@ -11,8 +11,6 @@ from typing import *
 import traceback
 
 import diffusers.pipelines
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion import StableDiffusionPipeline
-from diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion_img2img import StableDiffusionImg2ImgPipeline
 import torch
 import transformers
 import PIL
@@ -24,6 +22,9 @@ from .bot_request_handler import BotRequestHandler
 from .bot_request_context import BotRequestContext
 from .proc_args_context import ProcArgsContext
 from ..utils import image_grid
+
+from diffusers_mastodon_bot.community_pipeline.lpw_stable_diffusion \
+    import StableDiffusionLongPromptWeightingPipeline as StableDiffusionLpw
 
 
 class DiffusionRunner:
@@ -79,23 +80,6 @@ class DiffusionRunner:
         return embed
 
     @staticmethod
-    def args_prompts_as_input_text(
-        pipe: Any,
-        args_ctx: ProcArgsContext
-    ) -> Tuple[str, Optional[str]]:
-        # noinspection PyUnresolvedReferences
-        tokenizer: transformers.CLIPTokenizer = pipe.tokenizer  # type: ignore
-
-        positive_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['positive'], pipe.tokenizer)
-        negative_input_form = None
-
-        if args_ctx.prompts['negative'] is not None and len(args_ctx.prompts['negative']) > 0:
-            negative_input_form = DiffusionRunner.prompt_as_input_text(args_ctx.prompts['negative'], tokenizer)
-
-        return positive_input_form, negative_input_form
-
-
-    @staticmethod
     def make_processing_body(
         args_ctx: ProcArgsContext,
         positive_input_form: str,
@@ -143,7 +127,9 @@ class DiffusionRunner:
 
             result["time_took"] = f'{time_took}s'
 
-        result["image_filenames"] = DiffusionRunner.save_images(ctx, args_ctx, filename_root, generated_images_raw_pil)
+        if ctx.bot_ctx.save_image:
+            save_result = DiffusionRunner.save_images(ctx, args_ctx, filename_root, generated_images_raw_pil)
+            result["image_filenames"] = save_result
 
         uploaded_images = DiffusionRunner.upload_images(ctx, generated_images_raw_pil)
         result["images_list_posted"] = uploaded_images
@@ -163,7 +149,7 @@ class DiffusionRunner:
         )
 
     @staticmethod
-    def run_diffusion(ctx, args_ctx, pipe: StableDiffusionPipeline) -> Tuple[List[PIL.Image.Image], bool]:
+    def run_diffusion(ctx, args_ctx, pipe: StableDiffusionLpw) -> Tuple[List[PIL.Image.Image], bool]:
         left_images_count = args_ctx.target_image_count
         generated_images_raw_pil = []
         has_any_nsfw = False
@@ -184,11 +170,11 @@ class DiffusionRunner:
                 f"processing {args_ctx.target_image_count - left_images_count + 1} of {args_ctx.target_image_count}, "
                 + f"by {cur_process_count}")
 
-            pipe_results = pipe(
+            pipe_results = pipe.text2img(
                 [args_ctx.prompts['positive']] * cur_process_count,
                 negative_prompt=([args_ctx.prompts['negative_with_default']] * cur_process_count
-                                    if args_ctx.prompts['negative_with_default'] is not None
-                                    else None),
+                                 if args_ctx.prompts['negative_with_default'] is not None
+                                 else None),
                 **manual_proc_kwargs
             )
 
@@ -222,18 +208,19 @@ class DiffusionRunner:
         )
 
         # save init image too
-        DiffusionRunner.save_images(
-            ctx,
-            args_ctx,
-            filename_root=filename_root + '_src',
-            generated_images_raw_pil=[init_image],
-            save_args=False
-        )
+        if ctx.bot_ctx.save_image:
+            DiffusionRunner.save_images(
+                ctx,
+                args_ctx,
+                filename_root=filename_root + '_src',
+                generated_images_raw_pil=[init_image],
+                save_args=False
+            )
 
         return result
 
     @staticmethod
-    def run_img2img(ctx, args_ctx, pipe: StableDiffusionImg2ImgPipeline, init_image: PIL.Image.Image, generator: Optional[torch.Generator] = None) -> Tuple[List[PIL.Image.Image], bool]:
+    def run_img2img(ctx, args_ctx, pipe: StableDiffusionLpw, init_image: PIL.Image.Image, generator: Optional[torch.Generator] = None) -> Tuple[List[PIL.Image.Image], bool]:
         left_images_count = args_ctx.target_image_count
         generated_images_raw_pil = []
         has_any_nsfw = False
@@ -258,13 +245,13 @@ class DiffusionRunner:
                 f"processing {args_ctx.target_image_count - left_images_count + 1} of {args_ctx.target_image_count}, "
                 + f"by {cur_process_count}")
 
-            pipe_results = pipe(
-                [args_ctx.prompts['positive']] * cur_process_count,
+            pipe_results = pipe.img2img(
+                init_image=init_image,
+                prompt=[args_ctx.prompts['positive']] * cur_process_count,
                 negative_prompt=([args_ctx.prompts['negative_with_default']] * cur_process_count
                                     if args_ctx.prompts['negative_with_default'] is not None
                                     else None),
                 generator=generator,
-                init_image=init_image,
                 **manual_proc_kwargs
             )
 
