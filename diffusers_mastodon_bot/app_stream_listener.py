@@ -39,7 +39,7 @@ class AppStreamListener(mastodon.StreamListener):
                  image_tile_auto_expand=False,
                  image_max_attachment_count=4,
                  max_batch_process=2,
-                 device: str = 'cuda',
+                 device: str = 'cpu',
                  toot_on_start_end=True,
                  no_image_on_any_nsfw=True,
                  default_negative_prompt: Optional[str] = None,

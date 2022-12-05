@@ -133,7 +133,7 @@ def main():
     logging.info(f'you are, acct: {my_acct} / url: {my_url}')
 
     logging.info('loading model')
-    device_name = 'cuda'
+    device_name = 'cpu'
     pipe = create_diffusers_pipeline(device_name, pipe_kwargs)
 
     logging.info('creating handlers')
@@ -141,15 +141,15 @@ def main():
     req_handlers: List[BotRequestHandler] = [
         DiffuseMeHandler(
             pipe=pipe,
-            tag_name="diffuse_me",
+            tag_name="그려줘",
         ),
         DiffuseItHandler(
             pipe=pipe,
-            tag_name='diffuse_it'
+            tag_name='베껴줘'
         ),
         DiffuseGameHandler(
             pipe=pipe,
-            tag_name='diffuse_game',
+            tag_name='그림게임',
             messages=diffusion_game_messages,  # type: ignore
             response_duration_sec=60 * 30
         )

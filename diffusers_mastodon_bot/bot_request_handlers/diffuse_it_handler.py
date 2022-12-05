@@ -64,7 +64,7 @@ class DiffuseItHandler(BotRequestHandler):
         self.allow_self_request_only = allow_self_request_only
         self.re_strip_special_token = re.compile('<\|.*?\|>')
 
-        self.generator = torch.Generator(device='cuda')
+        self.generator = torch.Generator(device='cpu')
 
     def is_eligible_for(self, ctx: BotRequestContext) -> bool:
         contains_hash = ctx.contains_tag_name(self.tag_name)
