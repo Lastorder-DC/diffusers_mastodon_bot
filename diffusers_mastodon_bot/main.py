@@ -9,12 +9,14 @@ from mastodon import Mastodon
 import torch
 
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
+from pyChatGPT import ChatGPT
 
 from diffusers_mastodon_bot.app_stream_listener import AppStreamListener
 from diffusers_mastodon_bot.bot_request_handlers.bot_request_handler import BotRequestHandler
 from diffusers_mastodon_bot.bot_request_handlers.game.diffuse_game_handler import DiffuseGameHandler
 from diffusers_mastodon_bot.bot_request_handlers.diffuse_me_handler import DiffuseMeHandler
 from diffusers_mastodon_bot.bot_request_handlers.diffuse_it_handler import DiffuseItHandler
+from diffusers_mastodon_bot.bot_request_handlers.chatgpt_handler import ChatGptHandler
 from diffusers_mastodon_bot.community_pipeline.lpw_stable_diffusion \
     import StableDiffusionLongPromptWeightingPipeline as StableDiffusionLpw
 
@@ -123,6 +125,7 @@ def main():
     toot_listen_end = read_text_file('./config/toot_listen_end.txt')
     toot_listen_start_cw = read_text_file('./config/toot_listen_start_cw.txt')
     default_bot_name = read_text_file('./config/default_bot_name.txt')
+    chatgpt_token = read_text_file('./config/chatgpt_token.txt')
 
     pipe_kwargs = load_json_dict('./config/pipe_kwargs.json')
     proc_kwargs = load_json_dict('./config/proc_kwargs.json')
@@ -165,6 +168,10 @@ def main():
             tag_name='그림게임',
             messages=diffusion_game_messages,  # type: ignore
             response_duration_sec=60 * 30
+        ),
+        ChatGptHandler(
+            pipe=ChatGPT(chatgpt_token),
+            tag_name='질문'
         )
     ]  # type: ignore
 
