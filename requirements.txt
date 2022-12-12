@@ -9,3 +9,4 @@ requests
 scipy
 accelerate
 tensorboard
+pyChatGPT >= 0.2.4
