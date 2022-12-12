@@ -1,0 +1,1 @@
+see https://github.com/terry3041/pyChatGPT#obtaining-session_token
