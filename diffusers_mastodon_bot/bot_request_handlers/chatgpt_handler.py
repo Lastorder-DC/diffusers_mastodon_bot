@@ -43,7 +43,7 @@ class ChatGptHandler(BotRequestHandler):
 
     def respond_to(self, ctx: BotRequestContext, args_ctx: ProcArgsContext) -> bool:
         talk = args_ctx.prompts['positive']
-        in_progress_status = ctx.reply_to(ctx.status, 'processing...', keep_context=False)
+        in_progress_status = ctx.reply_to(ctx.status, '처리중...', keep_context=False)
 
         if 'num_inference_steps' in args_ctx.proc_kwargs \
             and args_ctx.proc_kwargs['num_inference_steps'] is not None:
@@ -73,13 +73,16 @@ class ChatGptHandler(BotRequestHandler):
                     status = "error"
         
         logging.info(f'building reply text')
+        try:
+            url = self.pastebin.create_paste(result, 1, "[drawai ask answer]" , "N", "markdown")
+            logging.info(url)
+        except Exception as e:
+            logging.error(e)
+            url = "pastebin 업로드 실패"
         
-        if len(result) > 400:
-            try:
-                url = self.pastebin.create_paste(result, 1, "[bot ask] " + talk, "N")
-                result = result[0:300] + "...\n\n" + url
-            except Exception as e:
-                result = "답변이 길지만 pastebin에 업로드할수 없었습니다.\n\n" + str(e)
+        if len(result) > 450:
+            result = result[0:400] + "...\n\n" + url
+            
         
         if len(talk) > 20:
             reply_message, spoiler_text = [result, "[" + status + "] " + talk[0:20] + "..."]
