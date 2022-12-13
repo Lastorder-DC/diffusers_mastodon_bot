@@ -9,4 +9,5 @@ requests
 scipy
 accelerate
 tensorboard
-pyChatGPT >= 0.2.4
+pyChatGPT >= 0.2.8
+pbwrap==1.3.1

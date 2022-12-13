@@ -82,7 +82,7 @@ class DiffuseItHandler(BotRequestHandler):
         positive_input_form = args_ctx.prompts['positive']
         negative_input_form = args_ctx.prompts['negative']
 
-        in_progress_status = ctx.reply_to(ctx.status, 'processing...', keep_context=False)
+        in_progress_status = ctx.reply_to(ctx.status, '처리중...', keep_context=False)
 
         if 'media_attachments' not in ctx.status.keys() or len(ctx.status['media_attachments']) == 0:
             ctx.reply_to(ctx.status, 'no attachment found')
@@ -206,8 +206,8 @@ class DiffuseItHandler(BotRequestHandler):
     def reply_in_progress(self, ctx: BotRequestContext, args_ctx: ProcArgsContext, positive_input_form: str, negative_input_form: Optional[str]):
         processing_body = DiffusionRunner.make_processing_body(args_ctx, positive_input_form, negative_input_form)
         in_progress_status = ctx.reply_to(status=ctx.status,
-                                          body=processing_body if len(processing_body) > 0 else 'processing...',
-                                          spoiler_text='processing...' if len(processing_body) > 0 else None,
+                                          body=processing_body if len(processing_body) > 0 else '처리중...',
+                                          spoiler_text='처리중...' if len(processing_body) > 0 else None,
                                           keep_context=True if len(processing_body) > 0 else False
                                           )
         return in_progress_status

@@ -10,6 +10,7 @@ import torch
 
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
 from pyChatGPT import ChatGPT
+from pbwrap import Pastebin
 
 from diffusers_mastodon_bot.app_stream_listener import AppStreamListener
 from diffusers_mastodon_bot.bot_request_handlers.bot_request_handler import BotRequestHandler
@@ -126,6 +127,7 @@ def main():
     toot_listen_start_cw = read_text_file('./config/toot_listen_start_cw.txt')
     default_bot_name = read_text_file('./config/default_bot_name.txt')
     chatgpt_token = read_text_file('./config/chatgpt_token.txt')
+    pastebin_token = read_text_file('./config/pastebin_token.txt')
 
     pipe_kwargs = load_json_dict('./config/pipe_kwargs.json')
     proc_kwargs = load_json_dict('./config/proc_kwargs.json')
@@ -171,6 +173,7 @@ def main():
         ),
         ChatGptHandler(
             pipe=ChatGPT(chatgpt_token),
+            pastebin=Pastebin(pastebin_token),
             tag_name='질문'
         )
     ]  # type: ignore
