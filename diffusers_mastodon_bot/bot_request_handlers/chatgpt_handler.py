@@ -5,30 +5,38 @@ import logging
 import math
 import re
 import time
+import asyncio
 
 from datetime import datetime
 from pathlib import Path
 from typing import *
 from pyChatGPT import ChatGPT
-from pbwrap import Pastebin
+from gists import File as GistFile
+from gists import Client as GistClient
 
 from .bot_request_handler import BotRequestHandler
 from .bot_request_context import BotRequestContext
 from .proc_args_context import ProcArgsContext
 
+async def upload_gist(client, question, body):
+    files = [
+        GistFile(name="answer-" + str(int(time.time())) + ".md", content=body),
+    ]
+
+    return await client.create_gist(files=files, description="Answer from ChatGPT requested by user - " + question, public=False)
 
 class ChatGptHandler(BotRequestHandler):
     def __init__(self,
                 pipe:ChatGPT,
-                pastebin:Pastebin,
+                gist:GistClient,
                 tag_name: str = 'ask',
                 allow_self_request_only: bool = False
                 ):
         self.pipe = pipe
-        self.pastebin = pastebin
+        self.gist = gist
         self.tag_name = tag_name
         self.allow_self_request_only = allow_self_request_only
-        self.re_strip_special_token = re.compile('<\|.*?\|>')
+        self.re_strip_special_token = re.compile(r'<\|.*?\|>')
 
     def is_eligible_for(self, ctx: BotRequestContext) -> bool:
         contains_hash = ctx.contains_tag_name(self.tag_name)
@@ -49,46 +57,55 @@ class ChatGptHandler(BotRequestHandler):
             and args_ctx.proc_kwargs['num_inference_steps'] is not None:
             args_ctx.proc_kwargs['num_inference_steps'] = int(args_ctx.proc_kwargs['num_inference_steps'])
         
-        logging.info(f'sending request to chatgpt...')
+        logging.info('sending request to chatgpt...')
         status = "done"
 
         try:
             raw_result = self.pipe.send_message(talk)
             result = raw_result['message']
-        except:
+        except Exception:
             try:
-                logging.info(f'error, retry one more time after 10 second...')
+                logging.info('error, retry one more time after 20 second...')
                 time.sleep(10)
-                raw_result = self.pipe.send_message(talk)
+                self.pipe.reset_conversation()
+                time.sleep(10)
+                raw_result = self.pipe.send_message(talk + ", in korean")
                 result = raw_result['message']
-            except Exception as e:
-                if "InvalidChunkLength" in str(e):
+            except Exception as general_error:
+                if "InvalidChunkLength" in str(general_error):
                     result = "AI가 대답하는데 너무 오래 걸렸습니다. 좀 더 단순한 질문을 해보세요."
                     status = "timeout"
-                elif "Status code 401" in str(e):
+                elif "Status code 401" in str(general_error):
                     result = "토큰이 만료되었습니다. @yumeka@twingyeo.kr"
                     status = "expired"
+                elif "Too many requests" in str(general_error):
+                    result = "API 사용 제한 상태. 잠시후 다시 요청해주세요."
+                    status = "error"
                 else:
-                    result = "오류 발생. 다시 시도해 보세요.\n\n" + str(e)
+                    result = "오류 발생. 다시 시도해 보세요.\n\n" + str(general_error)
                     status = "error"
         
         logging.info(f'building reply text')
         try:
-            url = self.pastebin.create_paste(result, 1, "[drawai ask answer]" , "N", "markdown")
+            gist = asyncio.run(upload_gist(self.gist, talk, result))
+            url = gist.url
             logging.info(url)
         except Exception as e:
             logging.error(e)
             url = "pastebin 업로드 실패"
         
         if len(result) > 450:
-            result = result[0:400] + "...\n\n" + url
+            result = result[0:350] + "...\n\n" + url
             
         
         if len(talk) > 20:
             reply_message, spoiler_text = [result, "[" + status + "] " + talk[0:20] + "..."]
         else:
             reply_message, spoiler_text = [result, "[" + status + "] " + talk]
-        reply_target_status = ctx.status if ctx.bot_ctx.delete_processing_message else in_progress_status
+        
+        behavior_conf = ctx.bot_ctx.behavior_conf
+
+        reply_target_status = ctx.status if behavior_conf.delete_processing_message else in_progress_status
 
         replied_status = ctx.reply_to(
             reply_target_status,
@@ -96,16 +113,16 @@ class ChatGptHandler(BotRequestHandler):
             visibility=ctx.reply_visibility,
             spoiler_text=spoiler_text,
             sensitive=True,
-            tag_behind=ctx.bot_ctx.tag_behind_on_image_post
+            tag_behind=behavior_conf.tag_behind_on_image_post
         )
 
-        if ctx.bot_ctx.tag_behind_on_image_post:
+        if behavior_conf.tag_behind_on_image_post:
             ctx.mastodon.status_reblog(replied_status['id'])
 
-        if ctx.bot_ctx.delete_processing_message:
+        if behavior_conf.delete_processing_message:
             ctx.mastodon.status_delete(in_progress_status)
 
-        logging.info(f'sent')
+        logging.info('sent')
 
         return True
 
