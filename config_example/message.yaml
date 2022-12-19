@@ -9,5 +9,5 @@ toot_listen_msg:
     this bot starts
   toot_listen_end:
     bot is exited
-  default_bot_name:
-    Mastodon Diffuser Bot
+default_bot_name:
+  Mastodon Diffuser Bot

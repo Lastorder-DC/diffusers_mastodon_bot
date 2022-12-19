@@ -13,4 +13,3 @@ diffusers_mastodon_bot starts!
 #bot #bot_message
 diffusers_mastodon_bot ends! don't send me anymore!
 """.strip()
-    default_bot_name: str = "Mastodon Diffuser Bot"
