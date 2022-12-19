@@ -1,0 +1,8 @@
+# instance URL with https://
+endpoint_url: https://YOUR_DOMAIN.COM.ES_HERE
+# access token, generated at dev page
+access_token: YOUR_ACCESS_TOKEN_GOES_HERE
+# default token for chatgpt. see https://github.com/terry3041/pyChatGPT#obtaining-session_token
+chatgpt_token: YOUR_CHATGPT_SESSION_KEY_GOES_HERE
+# token for create github gist. gist permission needed
+github_token: YOUR_GITHUB_TOKEN_WITH_GIST_GOES_HERE

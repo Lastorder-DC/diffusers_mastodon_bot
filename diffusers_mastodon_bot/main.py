@@ -3,15 +3,8 @@ import sys
 from pathlib import Path
 from typing import *
 import json
-from diffusers.utils.import_utils import is_xformers_available
 
 from mastodon import Mastodon
-
-import torch
-
-from diffusers.pipelines.stable_diffusion import StableDiffusionPipeline, StableDiffusionImg2ImgPipeline
-from pyChatGPT import ChatGPT
-from pbwrap import Pastebin
 
 from diffusers_mastodon_bot.app_stream_listener import AppStreamListener
 from diffusers_mastodon_bot.bot_request_handlers.bot_request_handler import BotRequestHandler
@@ -19,77 +12,23 @@ from diffusers_mastodon_bot.bot_request_handlers.game.diffuse_game_handler impor
 from diffusers_mastodon_bot.bot_request_handlers.diffuse_me_handler import DiffuseMeHandler
 from diffusers_mastodon_bot.bot_request_handlers.diffuse_it_handler import DiffuseItHandler
 from diffusers_mastodon_bot.bot_request_handlers.chatgpt_handler import ChatGptHandler
-from diffusers_mastodon_bot.community_pipeline.lpw_stable_diffusion \
-    import StableDiffusionLongPromptWeightingPipeline as StableDiffusionLpw
+from diffusers_mastodon_bot.bot_request_handlers.chatgpt_handler import ChatGptHandler
+from diffusers_mastodon_bot.conf.app.app_conf import AppConf
+from diffusers_mastodon_bot.conf.conf_helper import load_structured_conf_yaml
+
+
+from diffusers_mastodon_bot.conf.app.instance_conf import InstanceConf
+from diffusers_mastodon_bot.conf.diffusion.diffusion_conf import DiffusionConf
+from diffusers_mastodon_bot.conf.message.message_conf import MessageConf
+from diffusers_mastodon_bot.locales.locale_res import LocaleRes
+
+from diffusers_mastodon_bot.model_load import create_diffusers_pipeline
+
+from pyChatGPT import ChatGPT
+import asyncio
+import gists
 
 logger = logging.getLogger(__name__)
-
-def create_diffusers_pipeline(device_name='cuda', pipe_kwargs: Optional[Dict[str, Any]] = None):
-    if pipe_kwargs is None:
-        pipe_kwargs = {}
-
-    pipe_kwargs = pipe_kwargs.copy()
-
-    kwargs_defaults = {
-        "pretrained_model_name_or_path": 'hakurei/waifu-diffusion',
-        'revision': 'fp16'
-    }
-
-    for key, value in kwargs_defaults.items():
-        if key not in pipe_kwargs:
-            pipe_kwargs[key] = value
-
-    model_name_or_path = pipe_kwargs['pretrained_model_name_or_path']
-    del pipe_kwargs['pretrained_model_name_or_path']
-
-    torch_dtype = torch.float32
-    if 'torch_dtype' in pipe_kwargs:
-        dtype_param = pipe_kwargs['torch_dtype']
-        del pipe_kwargs['torch_dtype']
-
-        if dtype_param == 'torch.float16':
-            torch_dtype = torch.float16
-
-    if 'scheduler' in pipe_kwargs:
-        scheduler_param = pipe_kwargs['scheduler']
-        del pipe_kwargs['scheduler']
-
-        if scheduler_param == 'euler':
-            from diffusers import EulerDiscreteScheduler
-            pipe_kwargs['scheduler'] = EulerDiscreteScheduler.from_pretrained(model_name_or_path, subfolder="scheduler")
-        elif scheduler_param == 'euler_a':
-            from diffusers import EulerAncestralDiscreteScheduler
-            pipe_kwargs['scheduler'] = EulerAncestralDiscreteScheduler.from_pretrained(model_name_or_path,
-                                                                                       subfolder="scheduler")
-        elif scheduler_param == 'dpm_solver++':
-            from diffusers import DPMSolverMultistepScheduler
-            pipe_kwargs['scheduler'] = DPMSolverMultistepScheduler.from_pretrained(model_name_or_path,
-                                                                                   subfolder="scheduler")
-
-    pipe: StableDiffusionLpw = StableDiffusionLpw.from_pretrained(
-        model_name_or_path,
-        torch_dtype=torch_dtype,
-        safety_checker=None,
-        **pipe_kwargs
-    )
-
-    pipe = pipe.to(device_name)
-    pipe.enable_attention_slicing()
-
-    if is_xformers_available():
-        try:
-            pipe.unet.enable_xformers_memory_efficient_attention(True)
-        except Exception as e:
-            logger.warning(
-                "Could not enable memory efficient attention. Make sure xformers is installed"
-                f" correctly and a GPU is available: {e}"
-            )
-
-    pipe_kwargs['pretrained_model_name_or_path'] = model_name_or_path
-    pipe_kwargs['torch_dtype'] = 'torch.float16' if torch_dtype == torch.float16 else 'torch.float32'
-    pipe_kwargs['scheduler'] = str(type(pipe.scheduler).__name__)
-
-    return pipe, pipe_kwargs
 
 
 def read_text_file(filename: str) -> Union[str, None]:
@@ -111,6 +50,11 @@ def load_json_dict(filename: str) -> Union[None, Dict[str, Any]]:
     else:
         return None
 
+async def init_gist_client(github_token):
+    gistClient = gists.Client()
+    await gistClient.authorize(github_token)
+
+    return gistClient
 
 def main():
     logging.basicConfig(
@@ -122,36 +66,18 @@ def main():
         ]
     )
 
-    access_token = read_text_file('./config/access_token.txt')
-    endpoint_url = read_text_file('./config/endpoint_url.txt')
+    instance: InstanceConf = load_structured_conf_yaml(InstanceConf, './config/instance.yaml')  # type: ignore
+    app_conf: AppConf = load_structured_conf_yaml(AppConf, './config/app.yaml')  # type: ignore
+    diffusion_conf: DiffusionConf = load_structured_conf_yaml(DiffusionConf, './config/diffusion.yaml')  # type: ignore
+    msg_conf: MessageConf = load_structured_conf_yaml(MessageConf, './config/message.yaml')  # type: ignore
 
-    if access_token is None:
-        print('mastodon access token is required but not found. check ./config/access_token.txt')
-        exit()
-
-    if access_token is None:
-        print('mastodon endpoint url is required but not found. check ./config/endpoint_url.txt')
-        exit()
-
-    toot_listen_start = read_text_file('./config/toot_listen_start.txt')
-    toot_listen_end = read_text_file('./config/toot_listen_end.txt')
-    toot_listen_start_cw = read_text_file('./config/toot_listen_start_cw.txt')
-    default_bot_name = read_text_file('./config/default_bot_name.txt')
-    chatgpt_token = read_text_file('./config/chatgpt_token.txt')
-    pastebin_token = read_text_file('./config/pastebin_token.txt')
-
-    pipe_kwargs = load_json_dict('./config/pipe_kwargs.json')
-    proc_kwargs = load_json_dict('./config/proc_kwargs.json')
-    app_stream_listener_kwargs = load_json_dict('./config/app_stream_listener_kwargs.json')
-    if app_stream_listener_kwargs is None:
-        app_stream_listener_kwargs = {}
-
-    diffusion_game_messages = load_json_dict('./config/diffusion_game_messages.json')
+    locale_res = LocaleRes(app_conf.locale)
+    pipe_conf = diffusion_conf.pipeline
 
     logger.info('starting')
     mastodon = Mastodon(
-        access_token=access_token,
-        api_base_url=endpoint_url
+        access_token=instance.access_token,
+        api_base_url=instance.endpoint_url
     )
 
     logger.info('info checking')
@@ -161,9 +87,7 @@ def main():
     logger.info(f'you are, acct: {my_acct} / url: {my_url}')
 
     logger.info('loading model')
-    device_name = 'cuda'
-
-    pipe, pipe_kwargs = create_diffusers_pipeline(device_name, pipe_kwargs)
+    pipe, pipe_kwargs_info = create_diffusers_pipeline(pipe_conf)
 
     logger.info('creating handlers')
 
@@ -179,29 +103,28 @@ def main():
         DiffuseGameHandler(
             pipe=pipe,
             tag_name='그림게임',
-            messages=diffusion_game_messages,  # type: ignore
+            messages=locale_res.diffusion_game,  # type: ignore
             response_duration_sec=60 * 30
         ),
         ChatGptHandler(
-            pipe=ChatGPT(chatgpt_token),
-            pastebin=Pastebin(pastebin_token),
+            pipe=ChatGPT(instance.chatgpt_token),
+            gist=asyncio.run(init_gist_client(instance.github_token)),
             tag_name='질문'
         )
     ]  # type: ignore
 
     logger.info('creating listener')
-    listener = AppStreamListener(mastodon, pipe,
-                                 mention_to_url=my_url,
-                                 req_handlers=req_handlers,
-                                 toot_listen_start=toot_listen_start,
-                                 toot_listen_start_cw=toot_listen_start_cw,
-                                 toot_listen_end=toot_listen_end,
-                                 default_bot_name=default_bot_name,
-                                 device=device_name,
-                                 proc_kwargs=proc_kwargs,
-                                 pipe_kwargs=pipe_kwargs,
-                                 **app_stream_listener_kwargs
-                                 )
+    listener = AppStreamListener(
+        mastodon_client=mastodon,
+        diffusers_pipeline=pipe,
+        mention_to_url=my_url,
+        req_handlers=req_handlers,
+        diffusion_conf=diffusion_conf,
+        app_conf=app_conf,
+        message_conf=msg_conf,
+        locale_res=locale_res,
+        pipe_kwargs_info=pipe_kwargs_info
+    )
 
     mastodon.stream_user(listener, run_async=False, timeout=10000)
 
