@@ -94,22 +94,22 @@ def main():
     req_handlers: List[BotRequestHandler] = [
         DiffuseMeHandler(
             pipe=pipe,
-            tag_name="그려줘",
+            tag_name="diffuse_it",
         ),
         DiffuseItHandler(
             pipe=pipe,
-            tag_name='베껴줘'
+            tag_name='diffuse_me'
         ),
         DiffuseGameHandler(
             pipe=pipe,
-            tag_name='그림게임',
+            tag_name='diffuse_game',
             messages=locale_res.diffusion_game,  # type: ignore
             response_duration_sec=60 * 30
         ),
         ChatGptHandler(
             pipe=ChatGPT(instance.chatgpt_token),
             gist=asyncio.run(init_gist_client(instance.github_token)),
-            tag_name='질문'
+            tag_name='question'
         )
     ]  # type: ignore
 
